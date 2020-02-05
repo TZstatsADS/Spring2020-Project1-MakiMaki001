@@ -12,7 +12,9 @@ Term: Spring 2020
 + Projec title: Lyrics Data EDA
 + This project is conducted by [Marko Konte]
 
-+ Project summary: [In this EDA we looked at the dataset of over 30000 songs to find patterns and insights about them. We saw that the data was heavily skewed for songs that were in the 2000 decade. Specifically, we found that songs in 2006 and 2007 comprised of nearly half of the whole dataset.
++ Project summary: [
+
+In this EDA we looked at the dataset of over 30000 songs to find patterns and insights about them. We saw that the data was heavily skewed for songs that were in the 2000 decade. Specifically, we found that songs in 2006 and 2007 comprised of nearly half of the whole dataset.
 
 We also found interesting patterns when it comes to the words that are used per song. We looked at the most common words that are used in songs and saw trends as they pertain to what type of language is used per genre. We found that among commonly used words was 'baby', which is makes sense in that this word can be used for both a more romantic song or a more upbeat, dancing song. Words like love tended to cluster around the more sentimental of the genres, such as country. Finally, 'Party' and 'Rock' were most popular words used in genres such as Pop or Hip Hop. 
 
