@@ -1,0 +1,329 @@
+---
+title: "Project 1- Applied Data Science"
+author: "Marko Konte"
+date: "2/1/2020"
+output: html_document
+---
+
+
+## Intro
+
+We will be using the lyrics databse to do Exploratory Data Analaysis on insights we can garner from various songs within the dataset from over 130,000 songs. We will look at different aspects of these songs like the dates that they were released to the genre that they are in. We hope to find some meaningful insights from this data.  
+
+## Cleaning data
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+library(tm)
+library(data.table)
+library(tidytext)
+library(tidyverse)
+library(DT)
+library(textreadr)
+#install.packages('textreadr')
+library(dplyr)
+library(rvest)
+library(stringr)
+library(lubridate)
+library(SnowballC)
+library(wordcloud)
+library(RColorBrewer)
+
+load('C:/Users/marko/OneDrive/Documents/Columbia/Applied Data Science/data/lyrics.RData')
+
+#Creating a reduced dataset for the purpose of increasing processing power. 
+split = sample(nrow(dt_lyrics),size = 0.5*nrow(dt_lyrics))
+dt_lyrics = dt_lyrics[split,]
+
+## Preliminary cleaning of text 
+
+# Clean the text by converting all the letters to the lower case, and removing punctuation, numbers, empty words and extra white space.
+
+# Function for removimg leading and trailing whitespace from character strings 
+leadingWhitespace <- content_transformer(function(x) str_trim(x, side = "both"))
+
+# Removing stop words
+data("stop_words")
+stop_words
+
+word <- c("lot", "today", "months", "month", "wanna", "wouldnt", "wasnt", "ha", "na", "ooh", "da",
+          "gonna", "im", "dont", "aint", "wont", "yeah", "la", "oi", "nigga", "fuck",
+          "hey", "year", "years", "last", "past", "feel")
+          
+stop_words <- c(stop_words$word, word)
+
+# Cleaning data and making a corpus
+
+corpus <- VCorpus(VectorSource(dt_lyrics$lyrics)) %>%
+  tm_map(content_transformer(tolower))%>%
+  tm_map(removePunctuation)%>%
+  tm_map(removeWords, character(0))%>%
+  tm_map(removeWords, stop_words)%>%
+  tm_map(removeNumbers)%>%
+  tm_map(stripWhitespace)%>%
+  tm_map(leadingWhitespace)
+
+## 3. Stemming words and converting tm object to tidy object
+# Stemming reduces a word to its word *stem*. We stem the words here and then convert the "tm" object 
+#to a "tidy" object for faster processing.
+
+stemmed <- tm_map(corpus, stemDocument) %>%
+  tidy() %>%
+  select(text)
+
+## 4- Creating tidy format of the dictionary to be used for completing stems
+# We also need a dictionalry to look up the words corresponding to the stems.
+
+dict <- tidy(corpus) %>%
+  select(text) %>%
+  unnest_tokens(dictionary, text)
+
+## 5 Combining items and dictionalry into the same tibble
+completed <- stemmed %>%
+  mutate(id = row_number()) %>%
+  unnest_tokens(stems, text) %>%
+  bind_cols(dict) 
+
+## 6 - stem completion
+completed <- completed %>%
+  group_by(stems) %>%
+  count(dictionary) %>%
+  mutate(word = dictionary[which.max(n)]) %>%
+  ungroup() %>%
+  select(stems, word) %>%
+  distinct() %>%
+  right_join(completed) %>%
+  select(-stems)
+
+## 7 Pasting stem completed individual words into their respective lyrics
+#We are proceeding to resemble the structure of original lyrics. So we paste the words
+#together to form processed lyrics. 
+
+completed <- completed %>%
+  group_by(id) %>%
+  summarise(stemmedwords= str_c(word, collapse = " ")) %>%
+  ungroup()
+
+## 8 Keeping track of the processed lyric with their own ID
+
+dt_lyrics <- dt_lyrics %>%
+  mutate(id = row_number()) %>%
+  inner_join(completed)
+
+### Exporting the processed text data into a CSV file
+save(dt_lyrics, file="C:/Users/marko/OneDrive/Documents/Columbia/Applied Data Science/data/processed_lyrics.RData")
+load('C:/Users/marko/OneDrive/Documents/Columbia/Applied Data Science/data/processed_lyrics.RData')
+
+#Making the genre variable a factor
+
+dt_lyrics$genre <- as.factor(dt_lyrics$genre)
+
+
+```
+
+## Getting to know dataset
+
+First lets start with seeing how large of a span of time by genre that the dataset contains. We will do this by making a new variable that states the exact decade that song was made in. Having a greater understanding of the types of songs and genres that are within the dataset important to know the context of what type of music is predominant in the data. 
+
+```{r cars}
+
+## Adding column that shows the decade the song was made in:
+dt_lyrics$decade <- paste(str_sub(dt_lyrics$year, 1, 3), '0', sep = '')
+dt_lyrics$decade <- as.factor(dt_lyrics$decade)
+levels(dt_lyrics$decade)
+
+## Since it shows two strange decades (1120 and 7020) then wanted to see what these values were
+
+dt_lyrics[dt_lyrics$decade == '1120',]
+dt_lyrics[dt_lyrics$decade == '7020',]
+
+## Showing count of songs made per decade
+temp  <- dt_lyrics %>% group_by(lyrics, decade) %>% 
+  summarise(songs = n(),
+            artists = length(unique(artist))) %>% 
+  arrange(desc(decade))
+
+ggplot(data = temp, aes(x= decade, y = songs)) +
+  geom_bar(stat = 'identity', aes(fill = decade)) +
+  coord_flip() +
+  xlab('Decade') +
+  ylab('') +
+  labs(title = 'Songs and Artists by Decade') +
+  theme(text = element_text(size = 20))
+
+```
+
+From these views we recognize that the dataset is very skewed in terms of the years from which songs are placed in. The 2000's decade seem to have more than half of the number of songs as all other decades combined. This implies that the genre of music will be more modern than it would have been had there been a greater collection of older songs. For example, due to this we expect more pop and hip hop songs within the dataset than, for example, Jazz or Blues. 
+
+In order to confirm this exactly, we will take a look at the year that each song was made and see which years have the highest numbers of songs. This will be useful to see if there is some sort of centrality to the large number of songs that comprise the 2000's. 
+
+
+```{r }
+# Showing majority of songs made in 2006
+
+t <- dt_lyrics %>% group_by(year) %>% 
+  summarise(Count=n()) %>% arrange(desc(Count))
+print(tbl_df(t), n=10)
+
+
+``` 
+
+We see here that there is a very skewed amount of songs that are shown from the year 2006 specifically. There are 42,459 in 2006 and 30,601 in 2007, which alone comprises of over half of the data set (these figures are less than initial dataset, which was split for computational reasons).
+
+## Genre and year 
+
+Next we will look at what the breakdown is per genre. This will be a followup to a previous identifier that the songs will be of more modern form than something that would have been seen in a collection of songs from an older time. 
+
+```{r pressure, echo=FALSE}
+
+## Displaying songs by genre
+genre  <- dt_lyrics %>% group_by(artist, genre) %>% 
+  summarise(songs = n(),
+            artists = length(unique(artist))) %>% 
+  arrange(desc(artist))
+
+ggplot(data = genre) +
+  geom_bar(stat = 'identity', aes(x= reorder(genre, -songs), y = songs, fill = genre)) +
+  coord_flip() +
+  xlab('Genre') +
+  ylab('Songs') +
+  labs(title = 'Genre and Artists') +
+  theme(text = element_text(size = 20))
+
+## Breakdown of songs by decade by genre
+dcgenre  <- dt_lyrics %>% group_by(decade, genre, artist) %>% 
+  summarise(songs = n()) %>% 
+  arrange(desc(genre))
+
+
+ggplot(data = dcgenre) +
+  geom_bar(stat = 'identity', aes(x= decade, y = songs, fill = genre)) +
+  coord_flip() +
+  xlab('Decade') +
+  ylab('Songs') +
+  labs(title = 'per decade genre') +
+  theme(text = element_text(size = 20))
+
+dt_lyrics %>% group_by(genre, decade) %>%
+  summarise(songs = n(),
+            GenrePerc = n()/nrow(dt_lyrics)) %>%
+  arrange(desc(songs))
+
+ 
+```
+
+
+With the above charts we see the large percentage of rock songs that are within the dataset. Furthermore, we see that while the 2000's and 2010's decades had a wider varity of genre's, Rock was still very predominant in the percentage of songs that are that type from the dataset. This is somewhat surprising as new forms of music such as Hip Hop and Pop became so popular at this time. 
+
+## Word Plot
+
+```{r}
+#Could not run effectively on time. 
+
+```
+
+
+## Words by Artist
+
+Next we will look at the word count of a specific word from a song and see how common this is. First we will look at the word 'baby'. This word can be very neutral word as it is often times used in 
+
+```{r }
+
+# Making lyrics into factor to be able to use str_count
+
+dt_lyrics2 <- dt_lyrics
+dt_lyrics2$lyrics <- as.factor(dt_lyrics2$lyrics)
+
+# Baby
+
+dt_lyrics2$baby = str_count(dt_lyrics2$lyrics, 'baby')
+
+ggplot(dt_lyrics2) + aes(baby, year, col = genre, alpha = 1) + 
+  geom_point() + 
+  ylim(1968,2020)
+
+```
+
+
+## Other important words
+
+Next we will run the same process but with several other words that are commonly heard in music. Specifically, we will look at the prevalence of the words 'Love', 'Rock', and 'Party'. These are not only words that are very often used in music, but they are also very indicative of what type of song it is. 
+
+```{r }
+# Love
+dt_lyrics2$love = str_count(dt_lyrics2$lyrics, 'love')
+
+ggplot(dt_lyrics2) + aes(love, year, col = genre, alpha = 1) + 
+  geom_point() + 
+  ylim(1968,2020)
+
+
+```
+
+The word love is used more times than any of the other words that were looked at (including baby). The genre's in which it was used was relatively in line with what is expected, in more sentimental musical genre's such as indie or R&B, however there are some outliers on hip hop songs which must be individual songs with the word used a lot. Looking at the chart there does seem to be a major increase in the amount of times this word is used in the late 2000's and 2010's, however this is due to the underlying dataset skew. The word love is used 92,312 times in the dataset, far outnumbering other words analyzed. 
+
+
+```{r }
+# Rock 
+dt_lyrics2$rock = str_count(dt_lyrics2$lyrics, 'rock')
+
+ggplot(dt_lyrics2) + aes(rock, year, col = genre, alpha = 1) + 
+  geom_point() + 
+  ylim(1968,2020)
+
+```
+
+```{r}
+# Party
+dt_lyrics2$party = str_count(dt_lyrics2$lyrics, 'party')
+
+ggplot(dt_lyrics2) + aes(party, year, col = genre, alpha = 1) + 
+  geom_point() + 
+  ylim(1968,2020)
+
+sum(dt_lyrics2$party)
+sum(dt_lyrics2$rock)
+sum(dt_lyrics2$love)
+
+```
+
+As anticipated, the differences highlighted the prevalence of the word Party & Rock that are in line with the more upbeat genre's those types of words would be used for. For example, there was one song in 2007 which had used the word party 67 times which was considered a 'Pop' song. In addiion to pop songs, the popular ones to use these words are R&B, Rock, and Hip Hop, which all represent more upbeat genre's. Songs used the word rock 8,830 times while the word party was used 3,226. 
+
+## Isolating without Rock
+
+Due to the overwhelming number of rock songs within the dataset, we will isolate the table for just the non- rock songs to see the most commonly used words within them. 
+
+```{r}
+lyricsNR <- dt_lyrics[dt_lyrics$genre != 'Rock',]
+
+# Love
+lyricsNR$love = str_count(lyricsNR$lyrics, 'love')
+
+ggplot(lyricsNR) + aes(love, year, col = genre, alpha = 1) + 
+  geom_point() + 
+  ylim(1968,2020)
+
+```
+
+```{r}
+# Rock 
+lyricsNR$rock = str_count(lyricsNR$lyrics, 'rock')
+
+ggplot(lyricsNR) + aes(rock, year, col = genre, alpha = 1) + 
+  geom_point() + 
+  ylim(1968,2020)
+
+
+```
+
+The above two charts show the same information for the word's party and rock but exclude the Rock genre as it is such a large part of the dataset as a whole. 
+
+## Summary
+
+In this EDA we looked at the dataset of over 30000 songs to find patterns and insights about them. We saw that the data was heavily skewed for songs that were in the 2000 decade. Specifically, we found that songs in 2006 and 2007 comprised of nearly half of the whole dataset.
+
+We also found interesting patterns when it comes to the words that are used per song. We looked at the most common words that are used in songs and saw trends as they pertain to what type of language is used per genre. We found that among commonly used words was 'baby', which is makes sense in that this word can be used for both a more romantic song or a more upbeat, dancing song. Words like love tended to cluster around the more sentimental of the genres, such as country. Finally, 'Party' and 'Rock' were most popular words used in genres such as Pop or Hip Hop. 
+
+With a little more time (and experience) I would like to have been able to create a sentiment based word cloud based on the stemmed words that we created. The issue I came accross when creating a termdocumentmatrix is that the variables could not compute when trying to put the data into a matrix. This prevented me from being able to run the wordcloud (even with the truncated dataset with .5 of the initial observations). It would be good to learn best ways to achieve computational efficiency while also getting more comfort with running more complext text analysis models. 
+
