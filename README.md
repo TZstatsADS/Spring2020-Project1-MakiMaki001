@@ -25,6 +25,7 @@ Following [suggestions](http://nicercode.github.io/blog/2013-04-05-projects/) by
 ```
 proj/
 ├── lib/
+  The most useful packages in the running of this project are dplyr, kitr, tm, and the tidy suite of  packages.
 ├── data/
 ├── doc/
 ├── figs/
